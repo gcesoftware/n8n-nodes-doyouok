@@ -45,6 +45,33 @@ The node outputs `checkId`, `name`, `status` and `reason`.
 - The node remembers the ping URL in the workflow. It contacts the Doyouok website again only when the name, interval or check changes, or when the check was deleted.
 - In Doyouok, the name and interval of a check created by this node are read-only. Change them in n8n instead.
 
+## Example workflow
+
+A nightly import that must run every day and must process at least one row:
+
+```
+Schedule Trigger  →  Import Orders (HTTP Request)  →  Doyouok
+```
+
+1. **Schedule Trigger**: run every day at 02:00.
+2. **Import Orders**: any node that does the work. In this example it is an HTTP Request node that calls your import API and returns `{ "processedCount": 42 }`.
+3. **Doyouok** (Report Run):
+   - **Check**: *This Workflow (Automatic)*
+   - **Expected Every**: `1`, **Unit**: *Days*
+   - **Result**: *Check Conditions*
+   - **Conditions**: `{{ $json.processedCount }}` (Number) *is greater than* `0`
+   - **Options → Failure Message**: `Import processed {{ $json.processedCount }} rows`
+
+Save the workflow and run it once. The check appears in Doyouok with the workflow's name.
+
+What Doyouok reports:
+
+- **The import processed rows**: the run is reported as successful.
+- **The import ran but processed 0 rows**: the run is reported as failed and you get an alert with the failure message.
+- **The workflow did not run** (n8n was down, the workflow was deactivated, or the import node failed and stopped the workflow): no report arrives, and Doyouok alerts you that the run is overdue.
+
+To report errors at once instead of waiting for the overdue alert, enable **On Error → Continue (using error output)** on the business node and connect its error output to a second Doyouok node with **Result** set to *Failure*.
+
 ## Resources
 
 * [n8n community nodes documentation](https://docs.n8n.io/integrations/#community-nodes)
