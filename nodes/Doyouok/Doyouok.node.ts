@@ -1,4 +1,6 @@
 import type {
+	FilterConditionValue,
+	FilterValue,
 	IDataObject,
 	IExecuteFunctions,
 	IHttpRequestMethods,
@@ -9,12 +11,78 @@ import type {
 	INodeTypeDescription,
 	JsonObject,
 } from 'n8n-workflow';
-import { NodeApiError, NodeConnectionTypes, NodeOperationError, sleep } from 'n8n-workflow';
+import {
+	executeFilterCondition,
+	NodeApiError,
+	NodeConnectionTypes,
+	NodeOperationError,
+	sleep,
+} from 'n8n-workflow';
 
 // Checks created by this node are owned by source "n8n" + "<instanceId>:<workflowId>" on the Doyouok side,
 // so a workflow keeps the same check across renames (the name is re-synced whenever it changes).
 const SOURCE = 'n8n';
 const MINUTES_PER_UNIT: Record<string, number> = { minutes: 1, hours: 60, days: 1440 };
+
+// How a failed condition's operator reads in the fail reason ("rowCount is 3, expected > 7"); others use their operation name.
+const OPERATION_TEXT: Record<string, string> = {
+	gt: '>',
+	gte: '>=',
+	lt: '<',
+	lte: '<=',
+	equals: '=',
+	notEquals: '!=',
+	contains: 'contains',
+	notContains: 'does not contain',
+	startsWith: 'starts with',
+	notStartsWith: 'does not start with',
+	endsWith: 'ends with',
+	notEndsWith: 'does not end with',
+	regex: 'matches',
+	notRegex: 'does not match',
+	exists: 'exists',
+	notExists: 'does not exist',
+	empty: 'is empty',
+	notEmpty: 'is not empty',
+	true: 'is true',
+	false: 'is false',
+	after: 'after',
+	before: 'before',
+};
+
+function formatValue(value: unknown): string {
+	if (value === undefined || value === null || value === '') return 'empty';
+	const text = typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
+	return text.length > 100 ? `${text.slice(0, 100)}…` : text;
+}
+
+// "={{ $json.rowCount }}" -> "rowCount", so the reason names the field the user picked.
+function conditionLabel(rawLeftValue: unknown): string {
+	const text = String(rawLeftValue ?? '');
+	const expression = /^=\{\{\s*([\s\S]*?)\s*\}\}$/.exec(text);
+	return expression ? expression[1].replace(/^\$json\./, '') : text;
+}
+
+/** Lists the conditions the item didn't meet, with the value it had, e.g. `rowCount is 3, expected > 7`. */
+function describeFailedConditions(this: IExecuteFunctions, itemIndex: number): string {
+	const filter = this.getNodeParameter('conditions', itemIndex) as FilterValue;
+	const raw = this.getNodeParameter('conditions', itemIndex, undefined, { rawExpressions: true }) as FilterValue;
+	return filter.conditions
+		.map((condition: FilterConditionValue, index) => {
+			let met = false;
+			try {
+				met = executeFilterCondition(condition, filter.options, { index, itemIndex });
+			} catch {
+				// A value that fails type validation counts as not met.
+			}
+			if (met) return undefined;
+			const { operation, singleValue } = condition.operator;
+			const expected = `${OPERATION_TEXT[operation] ?? operation}${singleValue ? '' : ` ${formatValue(condition.rightValue)}`}`;
+			return `${conditionLabel(raw.conditions[index]?.leftValue)} is ${formatValue(condition.leftValue)}, expected ${expected}`;
+		})
+		.filter((text) => text !== undefined)
+		.join('; ');
+}
 
 // What the last successful registration returned, kept in the workflow's static data. Runs are
 // pinged straight to the stored ping URL (Doyouok's highly available ping service); the website is
@@ -31,6 +99,7 @@ async function doyouokRequest(
 	method: IHttpRequestMethods,
 	path: string,
 	body?: IDataObject,
+	fullResponse = false,
 ) {
 	const { baseUrl } = await this.getCredentials<{ baseUrl: string }>('doyouokApi');
 	return await this.helpers.httpRequestWithAuthentication.call(this, 'doyouokApi', {
@@ -38,15 +107,28 @@ async function doyouokRequest(
 		url: `${baseUrl.replace(/\/+$/, '')}/api/v1${path}`,
 		body,
 		json: true,
+		returnFullResponse: fullResponse,
+		ignoreHttpStatusErrors: fullResponse,
 	});
 }
 
 async function register(this: IExecuteFunctions, key: string, body: IDataObject): Promise<Registration> {
+	let statusCode: number;
 	let response: IDataObject;
 	try {
-		response = (await doyouokRequest.call(this, 'POST', '/register', body)) as IDataObject;
+		({ statusCode, body: response } = (await doyouokRequest.call(this, 'POST', '/register', body, true)) as {
+			statusCode: number;
+			body: IDataObject;
+		});
 	} catch (error) {
 		throw new NodeApiError(this.getNode(), error as JsonObject);
+	}
+	// Show Doyouok's own reason (e.g. the plan's check limit) instead of n8n's generic text for the status code.
+	if (statusCode >= 400) {
+		throw new NodeApiError(this.getNode(), (response ?? {}) as JsonObject, {
+			httpCode: String(statusCode),
+			message: (response?.error as string | undefined) || `Doyouok returned HTTP ${statusCode}`,
+		});
 	}
 	return {
 		key,
@@ -285,11 +367,23 @@ export class Doyouok implements INodeType {
 			let reason: string | undefined;
 			if (failed) {
 				const message = this.getNodeParameter('options.failureMessage', failedIndex, '') as string;
-				reason =
-					message ||
-					(result === 'conditions'
-						? `Success conditions not met (item ${failedIndex + 1} of ${items.length})`
-						: 'Reported as failed');
+				if (message) {
+					reason = message;
+				} else if (result === 'conditions') {
+					const details = describeFailedConditions.call(this, failedIndex);
+					reason = `Success conditions not met (item ${failedIndex + 1} of ${items.length})${details ? `: ${details}` : ''}`;
+				} else {
+					reason = 'Reported as failed';
+				}
+				// The alert email only shows this text, so name the workflow and link the failed run.
+				const workflow = this.getWorkflow();
+				const executionId = this.getExecutionId();
+				const lines = [`n8n workflow: "${workflow.name}"`];
+				if (workflow.id && executionId) {
+					const baseUrl = this.getInstanceBaseUrl().replace(/\/+$/, '');
+					lines.push(`Failed run: ${baseUrl}/workflow/${workflow.id}/executions/${executionId}`);
+				}
+				reason = [...lines, reason].join('\n');
 			}
 
 			// Re-register when anything that decides the check changes, including the credential or base URL.
