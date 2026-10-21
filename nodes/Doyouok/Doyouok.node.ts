@@ -9,12 +9,22 @@ import type {
 	INodeTypeDescription,
 	JsonObject,
 } from 'n8n-workflow';
-import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+import { NodeApiError, NodeConnectionTypes, NodeOperationError, sleep } from 'n8n-workflow';
 
 // Checks created by this node are owned by source "n8n" + "<instanceId>:<workflowId>" on the Doyouok side,
-// so a workflow keeps the same check across renames (the name is re-synced on every report).
+// so a workflow keeps the same check across renames (the name is re-synced whenever it changes).
 const SOURCE = 'n8n';
 const MINUTES_PER_UNIT: Record<string, number> = { minutes: 1, hours: 60, days: 1440 };
+
+// What the last successful registration returned, kept in the workflow's static data. Runs are
+// pinged straight to the stored ping URL (Doyouok's highly available ping service); the website is
+// only called again when the registration input changes or the ping URL stops working (404).
+interface Registration {
+	key: string;
+	checkId: string;
+	name: string;
+	pingUrl: string;
+}
 
 async function doyouokRequest(
 	this: IExecuteFunctions | ILoadOptionsFunctions,
@@ -29,6 +39,38 @@ async function doyouokRequest(
 		body,
 		json: true,
 	});
+}
+
+async function register(this: IExecuteFunctions, key: string, body: IDataObject): Promise<Registration> {
+	let response: IDataObject;
+	try {
+		response = (await doyouokRequest.call(this, 'POST', '/register', body)) as IDataObject;
+	} catch (error) {
+		throw new NodeApiError(this.getNode(), error as JsonObject);
+	}
+	return {
+		key,
+		checkId: response.checkId as string,
+		name: response.name as string,
+		pingUrl: response.pingUrl as string,
+	};
+}
+
+/** Returns the ping service's HTTP status: 200 when recorded (or the check is paused), 404 for an unknown ping key. */
+async function ping(this: IExecuteFunctions, pingUrl: string, failed: boolean, reason?: string) {
+	try {
+		const response = await this.helpers.httpRequest({
+			method: 'POST',
+			url: `${pingUrl}/${failed ? 'fail' : 'success'}`,
+			body: failed ? reason : undefined,
+			headers: failed ? { 'Content-Type': 'text/plain' } : undefined,
+			returnFullResponse: true,
+			ignoreHttpStatusErrors: true,
+		});
+		return response.statusCode as number;
+	} catch (error) {
+		throw new NodeApiError(this.getNode(), error as JsonObject);
+	}
 }
 
 export class Doyouok implements INodeType {
@@ -239,22 +281,50 @@ export class Doyouok implements INodeType {
 				);
 			}
 
-			body.status = failedIndex === -1 ? 'success' : 'fail';
-			if (failedIndex !== -1) {
+			const failed = failedIndex !== -1;
+			let reason: string | undefined;
+			if (failed) {
 				const message = this.getNodeParameter('options.failureMessage', failedIndex, '') as string;
-				body.reason =
+				reason =
 					message ||
 					(result === 'conditions'
 						? `Success conditions not met (item ${failedIndex + 1} of ${items.length})`
 						: 'Reported as failed');
 			}
 
-			let response: IDataObject;
-			try {
-				response = (await doyouokRequest.call(this, 'POST', '/report', body)) as IDataObject;
-			} catch (error) {
-				throw new NodeApiError(this.getNode(), error as JsonObject);
+			// Re-register when anything that decides the check changes, including the credential or base URL.
+			const { baseUrl } = await this.getCredentials<{ baseUrl: string }>('doyouokApi');
+			const key = JSON.stringify([this.getNode().credentials?.doyouokApi?.id, baseUrl, body]);
+			const staticData = this.getWorkflowStaticData('node') as { registration?: Registration };
+			let registration = staticData.registration;
+			let fresh = false;
+			if (registration?.key !== key) {
+				registration = await register.call(this, key, body);
+				fresh = true;
 			}
+
+			let status = await ping.call(this, registration.pingUrl, failed, reason);
+			// 404 on a stored URL: the check was deleted or its ping URL rotated in Doyouok; register again.
+			if (status === 404 && !fresh) {
+				registration = await register.call(this, key, body);
+				status = await ping.call(this, registration.pingUrl, failed, reason);
+			}
+			// A just-created or rotated ping URL is accepted once the ping service reloads its keys (every 10 seconds).
+			for (let attempt = 0; status === 404 && attempt < 3; attempt++) {
+				await sleep(5000);
+				status = await ping.call(this, registration.pingUrl, failed, reason);
+			}
+			if (status === 404) {
+				throw new NodeOperationError(this.getNode(), 'Doyouok did not accept the ping URL it returned');
+			}
+			staticData.registration = registration;
+
+			const response: IDataObject = {
+				checkId: registration.checkId,
+				name: registration.name,
+				status: failed ? 'fail' : 'success',
+				reason,
+			};
 			return [[{ json: response, pairedItem }]];
 		} catch (error) {
 			if (this.continueOnFail()) {

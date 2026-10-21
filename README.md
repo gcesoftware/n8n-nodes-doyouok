@@ -7,7 +7,7 @@ Add the Doyouok node at the end of a workflow. Doyouok alerts you when:
 - the workflow does not run on schedule (a missed or overdue run);
 - the workflow runs but its result is wrong, for example "0 rows processed" or a response without "success". This is a silent failure.
 
-You do not need to copy any ping URL. On the first run the node creates a check in Doyouok for the workflow. If you rename the workflow, the check's name updates on the next run.
+You do not need to copy any ping URL. On the first run the node creates a check in Doyouok for the workflow and gets its ping URL. Every run is then sent to Doyouok's ping service. If you rename the workflow, the check's name updates on the next run.
 
 [n8n](https://n8n.io/) is a [fair-code licensed](https://docs.n8n.io/sustainable-use-license/) workflow automation platform.
 
@@ -30,7 +30,7 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
   - **Failure Message** is shown in the alert.
   - **Client Name** is required on Agency plans.
 
-The node outputs Doyouok's response: `checkId`, `name`, `status`, `reason` and `recorded`.
+The node outputs `checkId`, `name`, `status` and `reason`.
 
 ## Credentials
 
@@ -42,6 +42,7 @@ The node outputs Doyouok's response: `checkId`, `name`, `status`, `reason` and `
 
 - Save the workflow before the first run. The check is linked to the workflow's ID.
 - A manual test run also counts as a report.
+- The node remembers the ping URL in the workflow. It contacts the Doyouok website again only when the name, interval or check changes, or when the check was deleted.
 - In Doyouok, the name and interval of a check created by this node are read-only. Change them in n8n instead.
 
 ## Resources
