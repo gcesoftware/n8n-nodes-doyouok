@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Add an example workflow to the README.
+
 ## 0.1.1
 
 - Add the MIT `LICENSE` file to the package.
