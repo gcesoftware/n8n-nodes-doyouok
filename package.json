@@ -11,6 +11,10 @@
 		"heartbeat",
 		"cron",
 		"silent failure",
+		"uptime",
+		"alert",
+		"healthcheck",
+		"workflow monitoring",
 		"doyouok"
 	],
 	"author": {

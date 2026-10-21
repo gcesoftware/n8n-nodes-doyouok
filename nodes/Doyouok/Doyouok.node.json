@@ -3,6 +3,19 @@
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
 	"categories": ["Development", "Utility"],
+	"alias": [
+		"Monitor",
+		"Monitoring",
+		"Heartbeat",
+		"Cron",
+		"Uptime",
+		"Alert",
+		"Healthcheck",
+		"Watchdog",
+		"Dead man's switch",
+		"Silent failure",
+		"Ping"
+	],
 	"resources": {
 		"credentialDocumentation": [
 			{
