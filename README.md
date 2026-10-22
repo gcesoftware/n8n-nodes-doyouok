@@ -9,6 +9,8 @@ Add the Doyouok node at the end of a workflow. Doyouok alerts you when:
 
 You do not need to copy any ping URL. On the first run the node creates a check in Doyouok for the workflow and gets its ping URL. Every run is then sent to Doyouok's ping service. If you rename the workflow, the check's name updates on the next run.
 
+Read the [introduction on the Doyouok blog](https://doyouok.com/blog/monitor-n8n-workflows-doyouok-node). Questions? The [help page](https://doyouok.com/n8n-help) has a setup guide, an FAQ and an assistant you can ask.
+
 [n8n](https://n8n.io/) is a [fair-code licensed](https://docs.n8n.io/sustainable-use-license/) workflow automation platform.
 
 ## Installation
@@ -76,3 +78,5 @@ To report errors at once instead of waiting for the overdue alert, enable **On E
 
 * [n8n community nodes documentation](https://docs.n8n.io/integrations/#community-nodes)
 * [Doyouok](https://doyouok.com)
+* [Doyouok for n8n help and FAQ](https://doyouok.com/n8n-help)
+* [Blog: Catch n8n workflows that fail silently](https://doyouok.com/blog/monitor-n8n-workflows-doyouok-node)
