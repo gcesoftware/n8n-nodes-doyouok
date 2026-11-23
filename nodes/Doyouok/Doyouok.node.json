@@ -14,7 +14,15 @@
 		"Watchdog",
 		"Dead man's switch",
 		"Silent failure",
-		"Ping"
+		"Ping",
+		"Missed Run",
+		"Overdue",
+		"Scheduled Job",
+		"Job Monitoring",
+		"Workflow Monitoring",
+		"Health Check",
+		"Check-in",
+		"Zero Rows"
 	],
 	"resources": {
 		"credentialDocumentation": [

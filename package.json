@@ -15,6 +15,9 @@
 		"alert",
 		"healthcheck",
 		"workflow monitoring",
+		"dead mans switch",
+		"missed run",
+		"scheduled job",
 		"doyouok"
 	],
 	"author": {

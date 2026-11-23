@@ -163,7 +163,7 @@ export class Doyouok implements INodeType {
 		group: ['output'],
 		version: [1],
 		subtitle: '={{ $parameter["result"] === "conditions" ? "Report run (check conditions)" : "Report run" }}',
-		description: 'Report workflow runs to Doyouok and get alerted on missed or silently failed runs',
+		description: 'Heartbeat monitoring: report each run to Doyouok and get alerted when a scheduled workflow misses a run or finishes with a bad result (e.g. 0 items processed)',
 		defaults: {
 			name: 'Doyouok',
 		},
