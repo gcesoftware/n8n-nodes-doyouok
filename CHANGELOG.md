@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Describe the node as heartbeat monitoring and add codex aliases and npm keywords (dead man's switch, missed run, scheduled job), so the node panel search and AI builders find it.
+
 ## 0.1.2
 
 - Add an example workflow to the README.
